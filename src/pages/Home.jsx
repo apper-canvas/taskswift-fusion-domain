@@ -2,53 +2,135 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'react-toastify';
+import { useSelector } from 'react-redux';
 import { getIcon } from '../utils/iconUtils';
 import MainFeature from '../components/MainFeature';
+import * as taskService from '../services/taskService';
 
 const Home = () => {
+  const { user } = useSelector(state => state.user);
   const [stats, setStats] = useState({
     total: 0,
     completed: 0,
     pending: 0,
     highPriority: 0
   });
-  
-  const [tasks, setTasks] = useState(() => {
-    const savedTasks = localStorage.getItem('tasks');
-    return savedTasks ? JSON.parse(savedTasks) : [];
-  });
-  
-  // Update stats when tasks change
-  useEffect(() => {
-    const completed = tasks.filter(task => task.completed).length;
-    const highPriority = tasks.filter(task => task.priority === 'high').length;
-    
-    setStats({
-      total: tasks.length,
-      completed,
-      pending: tasks.length - completed,
-      highPriority
-    });
-    
-    // Save to localStorage
-    localStorage.setItem('tasks', JSON.stringify(tasks));
-  }, [tasks]);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const addTask = (task) => {
-    setTasks(prev => [...prev, task]);
-    toast.success("Task added successfully!");
+  // Load tasks from database
+  useEffect(() => {
+    const fetchAllTasks = async () => {
+      try {
+        setLoading(true);
+        const fetchedTasks = await taskService.fetchTasks();
+        setTasks(fetchedTasks);
+        
+        // Calculate stats
+        const completed = fetchedTasks.filter(task => task.completed).length;
+        const highPriority = fetchedTasks.filter(task => task.priority === 'high').length;
+        
+        setStats({
+          total: fetchedTasks.length,
+          completed,
+          pending: fetchedTasks.length - completed,
+          highPriority
+        });
+        
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch tasks:', err);
+        setError('Failed to load tasks. Please try again later.');
+        toast.error('Failed to load tasks');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllTasks();
+  }, []);
+
+  const addTask = async (taskData) => {
+    try {
+      setLoading(true);
+      const newTask = await taskService.createTask(taskData);
+      setTasks(prev => [...prev, newTask]);
+      
+      // Update stats
+      setStats(prev => ({
+        ...prev,
+        total: prev.total + 1,
+        pending: prev.pending + 1,
+        highPriority: taskData.priority === 'high' ? prev.highPriority + 1 : prev.highPriority
+      }));
+      
+      toast.success("Task added successfully!");
+    } catch (error) {
+      toast.error("Failed to add task");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
   
-  const updateTask = (id, updateData) => {
-    setTasks(prev => 
-      prev.map(task => task.id === id ? { ...task, ...updateData } : task)
-    );
-    toast.success("Task updated successfully!");
+  const updateTask = async (id, updateData) => {
+    try {
+      setLoading(true);
+      await taskService.updateTask(id, updateData);
+      
+      // Update local state
+      setTasks(prev => prev.map(task => task.id === id ? { ...task, ...updateData } : task));
+      
+      // Update stats if completion status or priority changed
+      if (updateData.hasOwnProperty('completed') || updateData.hasOwnProperty('priority')) {
+        const updatedTasks = tasks.map(task => task.id === id ? { ...task, ...updateData } : task);
+        const completed = updatedTasks.filter(task => task.completed).length;
+        const highPriority = updatedTasks.filter(task => task.priority === 'high').length;
+        
+        setStats({
+          total: updatedTasks.length,
+          completed,
+          pending: updatedTasks.length - completed,
+          highPriority
+        });
+      }
+      
+      toast.success("Task updated successfully!");
+    } catch (error) {
+      toast.error("Failed to update task");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
   
-  const deleteTask = (id) => {
-    setTasks(prev => prev.filter(task => task.id !== id));
-    toast.success("Task deleted successfully!");
+  const deleteTask = async (id) => {
+    try {
+      setLoading(true);
+      await taskService.deleteTask(id);
+      
+      // Update local state
+      const taskToDelete = tasks.find(task => task.id === id);
+      setTasks(prev => prev.filter(task => task.id !== id));
+      
+      // Update stats
+      if (taskToDelete) {
+        setStats(prev => ({
+          total: prev.total - 1,
+          completed: taskToDelete.completed ? prev.completed - 1 : prev.completed,
+          pending: !taskToDelete.completed ? prev.pending - 1 : prev.pending,
+          highPriority: taskToDelete.priority === 'high' ? prev.highPriority - 1 : prev.highPriority
+        }));
+      }
+      
+      toast.success("Task deleted successfully!");
+    } catch (error) {
+      toast.error("Failed to delete task");
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
   
   // Get today's date in a nice format
@@ -68,8 +150,8 @@ const Home = () => {
         transition={{ duration: 0.5 }}
         className="mb-8"
       >
-        <h1 className="text-2xl md:text-3xl font-bold text-surface-800 dark:text-surface-100">
-          Welcome to <span className="text-primary">TaskSwift</span>
+        <h1 className="text-2xl md:text-3xl font-bold text-surface-800 dark:text-surface-100 flex items-center gap-2">
+          Welcome{user && <span>back, {user.firstName || 'User'}</span>} to <span className="text-primary">TaskSwift</span>
         </h1>
         <p className="mt-2 text-surface-600 dark:text-surface-300">
           Today is {today}

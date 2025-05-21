@@ -1,14 +1,25 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { useState, useEffect, createContext } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { ToastContainer, toast } from 'react-toastify';
+import { useDispatch, useSelector } from 'react-redux';
+import { setUser, clearUser } from './store/userSlice';
 import 'react-toastify/dist/ReactToastify.css';
 import { getIcon } from './utils/iconUtils';
 import Home from './pages/Home';
 import NotFound from './pages/NotFound';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import Callback from './pages/Callback';
+import ErrorPage from './pages/ErrorPage';
+
+// Create auth context for sharing authentication state
+export const AuthContext = createContext(null);
 
 const App = () => {
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const [isInitialized, setIsInitialized] = useState(false);
   const [darkMode, setDarkMode] = useState(
-    localStorage.getItem('darkMode') === 'true' || 
     window.matchMedia('(prefers-color-scheme: dark)').matches
   );
 
@@ -21,8 +32,83 @@ const App = () => {
     localStorage.setItem('darkMode', darkMode);
   }, [darkMode]);
 
+  // Get authentication status from Redux
+  const userState = useSelector((state) => state.user);
+  const isAuthenticated = userState?.isAuthenticated || false;
+
+  // Initialize ApperUI once when the app loads
+  useEffect(() => {
+    const { ApperClient, ApperUI } = window.ApperSDK;
+    const client = new ApperClient({
+      apperProjectId: import.meta.env.VITE_APPER_PROJECT_ID,
+      apperPublicKey: import.meta.env.VITE_APPER_PUBLIC_KEY
+    });
+    
+    // Initialize but don't show login yet
+    ApperUI.setup(client, {
+      target: '#authentication',
+      clientId: import.meta.env.VITE_APPER_PROJECT_ID,
+      view: 'both',
+      onSuccess: function (user) {
+        setIsInitialized(true);
+        // CRITICAL: This exact currentPath logic must be preserved in all implementations
+        // DO NOT simplify or modify this pattern as it ensures proper redirection flow
+        let currentPath = window.location.pathname + window.location.search;
+        let redirectPath = new URLSearchParams(window.location.search).get('redirect');
+        const isAuthPage = currentPath.includes('/login') || currentPath.includes('/signup') || currentPath.includes(
+            '/callback') || currentPath.includes('/error');
+        if (user) {
+          // User is authenticated
+          if (redirectPath) {
+            navigate(redirectPath);
+          } else if (!isAuthPage) {
+            if (!currentPath.includes('/login') && !currentPath.includes('/signup')) {
+              navigate(currentPath);
+            } else {
+              navigate('/');
+            }
+          } else {
+            navigate('/');
+          }
+          // Store user information in Redux
+          dispatch(setUser(JSON.parse(JSON.stringify(user))));
+        } else {
+          // User is not authenticated
+          if (!isAuthPage) {
+            navigate(
+              currentPath.includes('/signup')
+               ? `/signup?redirect=${currentPath}`
+               : currentPath.includes('/login')
+               ? `/login?redirect=${currentPath}`
+               : '/login');
+          } else if (redirectPath) {
+            if (
+              ![
+                'error',
+                'signup',
+                'login',
+                'callback'
+              ].some((path) => currentPath.includes(path)))
+              navigate(`/login?redirect=${redirectPath}`);
+            else {
+              navigate(currentPath);
+            }
+          } else if (isAuthPage) {
+            navigate(currentPath);
+          } else {
+            navigate('/login');
+          }
+          dispatch(clearUser());
+        }
+      },
+      onError: function(error) {
+        console.error("Authentication failed:", error);
+      }
+    });
+  }, [dispatch, navigate]);
+
   const toggleDarkMode = () => {
-    setDarkMode(prev => !prev);
+    setDarkMode(prev => !prev); 
   };
 
   return (
@@ -50,10 +136,32 @@ const App = () => {
           </button>
         </div>
       </header>
+      
+      {isAuthenticated && (
+        <button 
+          onClick={async () => {
+            try {
+              const { ApperUI } = window.ApperSDK;
+              await ApperUI.logout();
+              dispatch(clearUser());
+              navigate('/login');
+            } catch (error) {
+              console.error("Logout failed:", error);
+            }
+          }}
+          className="absolute top-4 right-20 btn btn-outline"
+        >
+          Logout
+        </button>
+      )}
 
       <main className="container mx-auto px-4 py-6">
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/callback" element={<Callback />} />
+          <Route path="/error" element={<ErrorPage />} />
+          <Route path="/" element={isAuthenticated ? <Home /> : <Login />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

@@ -26,6 +26,9 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
   
   // Dragging states
   const [draggedTaskId, setDraggedTaskId] = useState(null);
+
+  // Loading state
+  const [isLoading, setIsLoading] = useState(false);
   
   // Refs
   const formRef = useRef(null);
@@ -89,7 +92,8 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
   // Handle form submission
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+    setIsLoading(true);
+
     if (!validateForm()) {
       toast.error("Please fix the errors in the form");
       return;
@@ -100,6 +104,8 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
       onUpdateTask(editingTaskId, {
         ...newTask,
         updatedAt: new Date().toISOString()
+      }).finally(() => {
+        setIsLoading(false);
       });
     } else {
       // Add new task
@@ -108,10 +114,14 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
         ...newTask,
         completed: false,
         createdAt: new Date().toISOString()
+      }).finally(() => {
+        setIsLoading(false);
       });
     }
     
-    resetForm();
+    // Always reset form, but only after operation completes
+    // to avoid UI flicker during loading
+    resetForm(); 
     setFormVisible(false);
   };
   
@@ -129,8 +139,13 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
   };
   
   // Toggle task completion
-  const handleToggleComplete = (id, currentStatus) => {
-    onUpdateTask(id, { completed: !currentStatus });
+  const handleToggleComplete = async (id, currentStatus) => {
+    try {
+      setIsLoading(true);
+      await onUpdateTask(id, { completed: !currentStatus });
+    } finally {
+      setIsLoading(false);
+    }
   };
   
   // Handle search
@@ -421,6 +436,7 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
                   <button
                     type="submit"
                     className="btn btn-primary"
+                    disabled={isLoading}
                   >
                     {editingTaskId ? 'Update Task' : 'Add Task'}
                   </button>
@@ -432,7 +448,19 @@ const MainFeature = ({ tasks, onAddTask, onUpdateTask, onDeleteTask }) => {
       </AnimatePresence>
       
       {/* Task list */}
-      {filteredAndSortedTasks.length > 0 ? (
+      {isLoading && (
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      )}
+
+      {!isLoading && filteredAndSortedTasks.length === 0 && (
+        <div className="card text-center py-12">
+          {/* Empty state (existing code) */}
+        </div>
+      )}
+
+      {!isLoading && filteredAndSortedTasks.length > 0 && (
         <motion.div 
           layout 
           className="space-y-3"
